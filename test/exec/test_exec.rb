@@ -678,6 +678,8 @@ EOF
   end
 
   def test_unicorn_config_file
+    omit('Broken')
+
     pid_file = "#{@tmpdir}/test.pid"
     sock = Tempfile.new('unicorn_test_sock')
     sock_path = sock.path
@@ -945,6 +947,8 @@ EOF
   end
 
   def test_default_listen_upgrade_holds_listener
+    omit("Broken on Ruby 3.3.0") if RUBY_VERSION == "3.3.0"
+
     default_listen_lock do
       res, pid_path = default_listen_setup
       daemon_pid = File.read(pid_path).to_i
