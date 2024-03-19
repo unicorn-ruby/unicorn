@@ -10,8 +10,8 @@ test_files = manifest.grep(%r{\Atest/unit/test_.*\.rb\z}).map do |f|
 end.compact
 
 Gem::Specification.new do |s|
-  s.name = %q{unicorn}
-  s.version = (ENV['VERSION'] || '6.1.0').dup
+  s.name = "unicorn-maintained"
+  s.version = (ENV['VERSION'] || '6.2.0').dup
   s.authors = ['unicorn hackers']
   s.summary = 'Rack HTTP server for fast clients and Unix'
   s.description = File.read('README').split("\n\n")[1]
@@ -34,9 +34,9 @@ Gem::Specification.new do |s|
   # We do not have a hard dependency on rack, it's possible to load
   # things which respond to #call.  HTTP status lines in responses
   # won't have descriptive text, only the numeric status.
-  s.add_development_dependency(%q<rack>)
+  s.add_development_dependency('rack')
 
-  s.add_dependency(%q<raindrops>, '~> 0.7')
+  s.add_dependency('raindrops-maintained', '~> 0.21')
 
   s.add_development_dependency('test-unit', '~> 3.0')
 

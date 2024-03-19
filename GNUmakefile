@@ -261,7 +261,7 @@ doc_gz:
 	  gzip --rsyncable -9 < $$i > $$i.gz; touch -r $$i $$i.gz; done
 
 ifneq ($(VERSION),)
-rfpackage := unicorn
+rfpackage := unicorn-maintained
 pkggem := pkg/$(rfpackage)-$(VERSION).gem
 pkgtgz := pkg/$(rfpackage)-$(VERSION).tgz
 
