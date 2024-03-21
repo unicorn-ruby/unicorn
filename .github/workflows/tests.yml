@@ -1,0 +1,41 @@
+name: Run Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  tests:
+    runs-on: ubuntu-22.04
+
+    strategy:
+      matrix:
+        ruby: ['3.0', '3.1', '3.2', '3.3', 'ruby-head']
+        rack: ['2', '3']
+
+    name: Ruby ${{ matrix.ruby }} - Rack ${{ matrix.rack }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ragel
+        run: sudo apt-get install -y ragel
+
+      - name: Set up Ruby ${{ matrix.ruby }}
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+          ruby-version: ${{ matrix.ruby }}
+
+      - name: Install raindrops
+        run: gem install raindrops-maintained -v 0.21.0
+
+      - name: Install Rack ${{ matrix.rack }}
+        run: gem install rack -v '~> ${{ matrix.rack }}.0'
+
+      - name: Run tests with perl prove
+        run: make -j1 && prove -vw
