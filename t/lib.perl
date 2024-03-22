@@ -202,7 +202,7 @@ sub unicorn {
 	state $eng = $ENV{TEST_RUBY_ENGINE} // `$ruby -e 'print RUBY_ENGINE'`;
 	state $ext = File::Spec->rel2abs("test/$eng-$ver/ext/unicorn_http");
 	state $exe = File::Spec->rel2abs('bin/unicorn');
-	my $pid = spawn(\%env, $ruby, '-I', $lib, '-I', $ext, $exe, @args);
+	my $pid = spawn(\%env, 'bundle', 'exec', $ruby, '-I', $lib, '-I', $ext, $exe, @args);
 	UnicornTest::AutoReap->new($pid);
 }
 

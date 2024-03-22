@@ -3,9 +3,9 @@ all:: test
 
 RLFLAGS = -G2
 
-MRI = ruby
-RUBY = ruby
-RAKE = rake
+MRI = bundle exec ruby
+RUBY = bundle exec ruby
+RAKE = bundle exec rake
 RAGEL = ragel
 RSYNC = rsync
 OLDDOC = olddoc
