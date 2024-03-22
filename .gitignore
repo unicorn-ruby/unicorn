@@ -23,3 +23,5 @@ pkg/
 /LATEST
 /lib/unicorn/version.rb
 /*_1
+Gemfile.lock
+gemfiles/*.lock
