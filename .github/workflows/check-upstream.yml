@@ -1,0 +1,36 @@
+name: Check upstream
+
+permissions:
+  contents: read
+  issues: write 
+
+on:
+  schedule:
+    - cron:  '0 0 * * 0'
+  workflow_dispatch:
+
+jobs:
+  check-upstream:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get Upstream Commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          previous_issue_number=$(gh issue list --label "upstream change" --json number --jq '.[0].number')
+          if [[ -n $previous_issue_number ]]; then
+            echo Issue already exists
+            exit
+          fi
+          upstream_commit=$(git ls-remote https://yhbt.net/unicorn.git/ HEAD | awk '{ print $1}')
+          if git cat-file -e $upstream_commit^{commit}; then
+            echo No new commits
+            exit
+          fi
+          gh issue create \
+            --title "New upstream commit(s)" \
+            --label "upstream change" \
+            --body "Upstream changed to $upstream_commit"
