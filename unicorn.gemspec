@@ -38,6 +38,7 @@ Gem::Specification.new do |s|
   s.add_development_dependency('rack')
 
   s.add_dependency('raindrops-maintained', '~> 0.21')
+  s.add_dependency('logger')
 
   s.add_development_dependency('test-unit', '~> 3.0')
 
