@@ -47,6 +47,7 @@ def env_dump(env)
     else
       case k
       when 'rack.version', 'rack.after_reply'; h[k] = v
+      when 'rack.input'; h[k] = v.class.to_s
       end
     end
   end
@@ -86,6 +87,7 @@ def rack_input_tests(env)
   [ 200, h, [ dig.hexdigest ] ]
 end
 
+$nr_aborts = 0
 run(lambda do |env|
   case env['REQUEST_METHOD']
   when 'GET'
@@ -100,6 +102,10 @@ run(lambda do |env|
     when '/early_hints_rack2'; early_hints(env, "r\n2")
     when '/early_hints_rack3'; early_hints(env, %w(r 3))
     when '/broken_app'; raise RuntimeError, 'hello'
+    when '/aborted'; $nr_aborts += 1; [ 200, {}, [] ]
+    when '/nr_aborts'; [ 200, { 'nr-aborts' => "#$nr_aborts" }, [] ]
+    when '/nil'; nil
+    when '/read_fifo'; [ 200, {}, [ File.read(env['HTTP_READ_FIFO']) ] ]
     else '/'; [ 200, {}, [ env_dump(env) ] ]
     end # case PATH_INFO (GET)
   when 'POST'
@@ -111,6 +117,11 @@ run(lambda do |env|
   when 'PUT'
     case env['PATH_INFO']
     when %r{\A/rack_input}; rack_input_tests(env)
+    when '/env_dump'; [ 200, {}, [ env_dump(env) ] ]
+    end
+  when 'OPTIONS'
+    case env['REQUEST_URI']
+    when '*'; [ 200, {}, [ env_dump(env) ] ]
     end
   end # case REQUEST_METHOD
 end) # run

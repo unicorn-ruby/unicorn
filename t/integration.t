@@ -18,13 +18,12 @@ if ('ensure Perl does not set SO_KEEPALIVE by default') {
 	$val = getsockopt($srv, SOL_SOCKET, SO_KEEPALIVE);
 }
 my $t0 = time;
-open my $conf_fh, '>', $u_conf;
-$conf_fh->autoflush(1);
 my $u1 = "$tmpdir/u1";
-print $conf_fh <<EOM;
+my $conf_fh = write_file '>', $u_conf, <<EOM;
 early_hints true
 listen "$u1"
 EOM
+$conf_fh->autoflush(1);
 my $ar = unicorn(qw(-E none t/integration.ru -c), $u_conf, { 3 => $srv });
 my $curl = which('curl');
 local $ENV{NO_PROXY} = '*'; # for curl
@@ -104,14 +103,75 @@ is_deeply([ grep(/^x-r3: /, @$hdr) ],
 
 SKIP: {
 	eval { require JSON::PP } or skip "JSON::PP missing: $@", 1;
-	($status, $hdr, my $json) = do_req $srv, 'GET /env_dump';
+	my $get_json = sub {
+		my (@req) = @_;
+		my @r = do_req $srv, @req;
+		my $env = eval { JSON::PP->new->decode($r[2]) };
+		diag "$@ (r[2]=$r[2])" if $@;
+		is ref($env), 'HASH', "@req response body is JSON";
+		(@r, $env)
+	};
+	($status, $hdr, my $json, my $env) = $get_json->('GET /env_dump');
 	is($status, undef, 'no status for HTTP/0.9');
 	is($hdr, undef, 'no header for HTTP/0.9');
 	unlike($json, qr/^Connection: /smi, 'no connection header for 0.9');
 	unlike($json, qr!\AHTTP/!s, 'no HTTP/1.x prefix for 0.9');
-	my $env = JSON::PP->new->decode($json);
-	is(ref($env), 'HASH', 'JSON decoded body to hashref');
 	is($env->{SERVER_PROTOCOL}, 'HTTP/0.9', 'SERVER_PROTOCOL is 0.9');
+	is $env->{'rack.url_scheme'}, 'http', 'rack.url_scheme default';
+	is $env->{'rack.input'}, 'StringIO', 'StringIO for no content';
+
+	my $req = 'OPTIONS *';
+	($status, $hdr, $json, $env) = $get_json->("$req HTTP/1.0");
+	is $env->{REQUEST_PATH}, '', "$req => REQUEST_PATH";
+	is $env->{PATH_INFO}, '', "$req => PATH_INFO";
+	is $env->{REQUEST_URI}, '*', "$req => REQUEST_URI";
+
+	$req = 'GET http://e:3/env_dump?y=z';
+	($status, $hdr, $json, $env) = $get_json->("$req HTTP/1.0");
+	is $env->{REQUEST_PATH}, '/env_dump', "$req => REQUEST_PATH";
+	is $env->{PATH_INFO}, '/env_dump', "$req => PATH_INFO";
+	is $env->{QUERY_STRING}, 'y=z', "$req => QUERY_STRING";
+
+	$req = 'GET http://e:3/env_dump#frag';
+	($status, $hdr, $json, $env) = $get_json->("$req HTTP/1.0");
+	is $env->{REQUEST_PATH}, '/env_dump', "$req => REQUEST_PATH";
+	is $env->{PATH_INFO}, '/env_dump', "$req => PATH_INFO";
+	is $env->{QUERY_STRING}, '', "$req => QUERY_STRING";
+	is $env->{FRAGMENT}, 'frag', "$req => FRAGMENT";
+
+	$req = 'GET http://e:3/env_dump?a=b#frag';
+	($status, $hdr, $json, $env) = $get_json->("$req HTTP/1.0");
+	is $env->{REQUEST_PATH}, '/env_dump', "$req => REQUEST_PATH";
+	is $env->{PATH_INFO}, '/env_dump', "$req => PATH_INFO";
+	is $env->{QUERY_STRING}, 'a=b', "$req => QUERY_STRING";
+	is $env->{FRAGMENT}, 'frag', "$req => FRAGMENT";
+
+	for my $proto (qw(https http)) {
+		$req = "X-Forwarded-Proto: $proto";
+		($status, $hdr, $json, $env) = $get_json->(
+						"GET /env_dump HTTP/1.0\r\n".
+						"X-Forwarded-Proto: $proto");
+		is $env->{REQUEST_PATH}, '/env_dump', "$req => REQUEST_PATH";
+		is $env->{PATH_INFO}, '/env_dump', "$req => PATH_INFO";
+		is $env->{'rack.url_scheme'}, $proto, "$req => rack.url_scheme";
+	}
+
+	$req = 'X-Forwarded-Proto: ftp'; # invalid proto
+	($status, $hdr, $json, $env) = $get_json->(
+					"GET /env_dump HTTP/1.0\r\n".
+					"X-Forwarded-Proto: ftp");
+	is $env->{REQUEST_PATH}, '/env_dump', "$req => REQUEST_PATH";
+	is $env->{PATH_INFO}, '/env_dump', "$req => PATH_INFO";
+	is $env->{'rack.url_scheme'}, 'http', "$req => rack.url_scheme";
+
+	($status, $hdr, $json, $env) = $get_json->("PUT /env_dump HTTP/1.0\r\n".
+						'Content-Length: 0');
+	is $env->{'rack.input'}, 'StringIO', 'content-length: 0 uses StringIO';
+
+	($status, $hdr, $json, $env) = $get_json->("PUT /env_dump HTTP/1.0\r\n".
+						'Content-Length: 1');
+	is $env->{'rack.input'}, 'Unicorn::TeeInput',
+		'content-length: 1 uses TeeInput';
 }
 
 # cf. <CAO47=rJa=zRcLn_Xm4v2cHPr6c0UswaFC_omYFEH+baSxHOWKQ@mail.gmail.com>
@@ -123,7 +183,23 @@ check_stderr;
 ($status, $hdr, $bdy) = do_req($srv, 'GET /broken_app HTTP/1.0');
 like($status, qr!\AHTTP/1\.[0-1] 500\b!, 'got 500 error on broken endpoint');
 is($bdy, undef, 'no response body after exception');
-truncate($errfh, 0);
+seek $errfh, 0, SEEK_SET;
+{
+	my $nxt;
+	while (!defined($nxt) && defined($_ = <$errfh>)) {
+		$nxt = <$errfh> if /app error/;
+	}
+	ok $nxt, 'got app error' and
+		like $nxt, qr/\bintegration\.ru/, 'got backtrace';
+}
+seek $errfh, 0, SEEK_SET;
+truncate $errfh, 0;
+
+($status, $hdr, $bdy) = do_req($srv, 'GET /nil HTTP/1.0');
+like($status, qr!\AHTTP/1\.[0-1] 500\b!, 'got 500 error on nil endpoint');
+like slurp($err_log), qr/app error/, 'exception logged for nil';
+seek $errfh, 0, SEEK_SET;
+truncate $errfh, 0;
 
 my $ck_early_hints = sub {
 	my ($note) = @_;
@@ -163,6 +239,11 @@ SKIP: {
 if ('bad requests') {
 	($status, $hdr) = do_req $srv, 'GET /env_dump HTTP/1/1';
 	like($status, qr!\AHTTP/1\.[01] 400 \b!, 'got 400 on bad request');
+
+	for my $abs_uri (qw(ssh+http://e/ ftp://e/x http+ssh://e/x)) {
+		($status, $hdr) = do_req $srv, "GET $abs_uri HTTP/1.0";
+		like $status, qr!\AHTTP/1\.[01] 400 \b!, "400 on $abs_uri";
+	}
 
 	$c = tcp_start($srv);
 	print $c 'GET /';
@@ -324,6 +405,39 @@ EOM
 	my $wpid = readline($fifo_fh);
 	like($wpid, qr/\Apid=\d+\z/a , 'new worker ready');
 	$ck_early_hints->('ccc on');
+
+	$c = tcp_start $srv, 'GET /env_dump HTTP/1.0';
+	vec(my $rvec = '', fileno($c), 1) = 1;
+	select($rvec, undef, undef, 10) or BAIL_OUT 'timed out env_dump';
+	($status, $hdr) = slurp_hdr($c);
+	like $status, qr!\AHTTP/1\.[01] 200!, 'got part of first response';
+	ok $hdr, 'got all headers';
+
+	# start a slow TCP request
+	my $rfifo = "$tmpdir/rfifo";
+	mkfifo_die $rfifo;
+	$c = tcp_start $srv, "GET /read_fifo HTTP/1.0\r\nRead-FIFO: $rfifo";
+	tcp_start $srv, 'GET /aborted HTTP/1.0' for (1..100);
+	write_file '>', $rfifo, 'TFIN';
+	($status, $hdr) = slurp_hdr($c);
+	like $status, qr!\AHTTP/1\.[01] 200!, 'got part of first response';
+	$bdy = <$c>;
+	is $bdy, 'TFIN', 'got slow response from TCP socket';
+
+	# slow Unix socket request
+	$c = unix_start $u1, "GET /read_fifo HTTP/1.0\r\nRead-FIFO: $rfifo";
+	vec($rvec = '', fileno($c), 1) = 1;
+	select($rvec, undef, undef, 10) or BAIL_OUT 'timed out Unix CCC';
+	unix_start $u1, 'GET /aborted HTTP/1.0' for (1..100);
+	write_file '>', $rfifo, 'UFIN';
+	($status, $hdr) = slurp_hdr($c);
+	like $status, qr!\AHTTP/1\.[01] 200!, 'got part of first response';
+	$bdy = <$c>;
+	is $bdy, 'UFIN', 'got slow response from Unix socket';
+
+	($status, $hdr, $bdy) = do_req $srv, 'GET /nr_aborts HTTP/1.0';
+	like "@$hdr", qr/nr-aborts: 0\b/,
+		'aborted connections unseen by Rack app';
 }
 
 if ('max_header_len internal API') {
